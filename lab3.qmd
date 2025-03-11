@@ -1,0 +1,239 @@
+---
+title: "Lab3"
+subtitle: ESS 330
+author: 
+  - name: Sierra Champion
+    email:
+format: html
+editor: visual
+---
+##Install
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+install.packages("zoo")
+install.packages("flextable")
+```
+
+##Question 1
+```{r}
+library(tidyverse)
+library(flextable)
+library(zoo)  
+
+my.date <- as.Date("2022-02-01")
+my.state <- "Colorado"
+
+covid_url <- "https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv"
+covid_data <- read_csv(covid_url)
+```
+
+##Question 2
+```{r}
+colorado_data <- covid_data %>%
+  filter(state == my.state) %>%
+  group_by(county) %>%
+  arrange(date) %>%
+  mutate(
+    new_cases = cases - lag(cases, default = 0),
+    new_deaths = deaths - lag(deaths, default = 0)
+  ) %>%
+  ungroup()
+```
+
+##Question 3
+```{r}
+
+top_cumulative_cases <- colorado_data %>%
+  filter(date == my.date) %>%
+  arrange(desc(cases)) %>%
+  head(5) %>%
+  select(county, cases) %>%
+  flextable() %>%
+  set_caption("Top 5 Counties by Cumulative Cases in Colorado")
+
+top_new_cases <- colorado_data %>%
+  filter(date == my.date) %>%
+  arrange(desc(new_cases)) %>%
+  head(5) %>%
+  select(county, new_cases) %>%
+  flextable() %>%
+  set_caption("Top 5 Counties by New Cases in Colorado")
+
+top_cumulative_cases
+top_new_cases
+```
+
+##Question 4
+```{r}
+
+# Read the population data
+pop_url <- "https://www2.census.gov/programs-surveys/popest/datasets/2020-2021/counties/totals/co-est2021-alldata.csv"
+population_data <- read_csv(pop_url)
+
+population_data <- population_data %>%
+  mutate(
+    STATE = str_pad(STATE, 2, pad = "0"),
+    COUNTY = str_pad(COUNTY, 3, pad = "0"),
+    fips = paste0(STATE, COUNTY)
+  ) %>%
+  filter(trimws(COUNTY) != "000") %>%  
+  select(fips, CTYNAME, contains("2021"))  
+```
+
+
+##Question 5
+```{r}
+
+merged_data <- colorado_data %>%
+  left_join(population_data, by = c("fips" = "fips")) %>%
+  mutate(
+    per_capita_cases = cases / `POPESTIMATE2021` * 100000,
+    per_capita_new_cases = new_cases / `POPESTIMATE2021` * 100000,
+    per_capita_new_deaths = new_deaths / `POPESTIMATE2021` * 100000
+  )
+
+top_per_capita_cases <- merged_data %>%
+  filter(date == my.date) %>%
+  arrange(desc(per_capita_cases)) %>%
+  head(5) %>%
+  select(county, per_capita_cases) %>%
+  flextable() %>%
+  set_caption("Top 5 Counties by Per Capita Cumulative Cases")
+
+top_per_capita_new_cases <- merged_data %>%
+  filter(date == my.date) %>%
+  arrange(desc(per_capita_new_cases)) %>%
+  head(5) %>%
+  select(county, per_capita_new_cases) %>%
+  flextable() %>%
+  set_caption("Top 5 Counties by Per Capita New Cases")
+
+top_per_capita_cases
+top_per_capita_new_cases
+
+```
+##Question 6
+```{r}
+
+last_14_days <- merged_data %>%
+  filter(date >= my.date - 14 & date <= my.date) %>%
+  group_by(county) %>%
+  summarize(
+    total_new_cases_14_days = sum(new_cases, na.rm = TRUE),
+    pop = first(`POPESTIMATE2021`),
+    per_100k_14_days = (total_new_cases_14_days / pop) * 100000
+  )
+
+watchlist_counties <- last_14_days %>%
+  filter(per_100k_14_days > 100) %>%
+  arrange(desc(per_100k_14_days)) %>%
+  flextable() %>%
+  set_caption("Counties Meeting the Watch List Condition")
+
+watchlist_counties
+```
+
+##Question 7
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+
+centroids_url <- "https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv"
+centroids_data <- read_csv(centroids_url)
+
+covid_geo <- covid_data %>%
+  left_join(centroids_data, by = "fips") %>%
+  drop_na(LAT, LON)  
+
+weighted_center <- covid_geo %>%
+  group_by(date) %>%
+  summarize(
+    total_cases = sum(cases, na.rm = TRUE),
+    weighted_lat = sum(LAT * cases, na.rm = TRUE) / total_cases,
+    weighted_lng = sum(LON * cases, na.rm = TRUE) / total_cases,
+    month = format(date, "%m")  
+  ) %>%
+  drop_na(weighted_lat, weighted_lng)  
+
+ggplot() +
+  borders("state", fill = "gray90", colour = "white") +  
+  geom_point(data = weighted_center, aes(x = weighted_lng, y = weighted_lat, color = month, size = total_cases), alpha = 0.7) +
+  scale_color_viridis_d() +  
+  theme_minimal() +
+  labs(
+    title = "Weighted Mean Center of COVID-19 Cases Over Time",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Month",
+    size = "Total Cases"
+  )
+
+```
+
+##Question 8
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+
+centroids_url <- "https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv"
+centroids_data <- read_csv(centroids_url)
+
+covid_geo <- covid_data %>%
+  left_join(centroids_data, by = "fips") %>%
+  drop_na(LAT, LON)  
+
+weighted_center_cases <- covid_geo %>%
+  group_by(date) %>%
+  summarize(
+    total_cases = sum(cases, na.rm = TRUE),
+    weighted_lat_cases = sum(LAT * cases, na.rm = TRUE) / total_cases,
+    weighted_lng_cases = sum(LON * cases, na.rm = TRUE) / total_cases,
+    month = format(date, "%m") 
+  ) %>%
+  drop_na(weighted_lat_cases, weighted_lng_cases)  
+
+weighted_center_deaths <- covid_geo %>%
+  group_by(date) %>%
+  summarize(
+    total_deaths = sum(deaths, na.rm = TRUE),
+    weighted_lat_deaths = sum(LAT * deaths, na.rm = TRUE) / total_deaths,
+    weighted_lng_deaths = sum(LON * deaths, na.rm = TRUE) / total_deaths,
+    month = format(date, "%m")
+  ) %>%
+  drop_na(weighted_lat_deaths, weighted_lng_deaths)  
+
+plot_cases <- ggplot() +
+  borders("state", fill = "gray90", colour = "white") + 
+  
+  geom_point(data = weighted_center_cases, aes(x = weighted_lng_cases, y = weighted_lat_cases, color = month, size = total_cases), alpha = 0.7) +
+  scale_color_viridis_d() +  
+  theme_minimal() +
+  labs(
+    title = "Weighted Mean Center of COVID-19 Cases Over Time",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Month",
+    size = "Total Cases"
+  ) +
+  theme(plot.title = element_text(color = "red"))
+
+plot_deaths <- ggplot() +
+  borders("state", fill = "gray90", colour = "white") + 
+  geom_point(data = weighted_center_deaths, aes(x = weighted_lng_deaths, y = weighted_lat_deaths, color = month, size = total_deaths), alpha = 0.7) +
+  scale_color_viridis_d() +  
+  theme_minimal() +
+  labs(
+    title = "Weighted Mean Center of COVID-19 Deaths Over Time",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Month",
+    size = "Total Deaths"
+  ) +
+  theme(plot.title = element_text(color = "navy"))
+
+plot_cases + plot_deaths
+
+```
